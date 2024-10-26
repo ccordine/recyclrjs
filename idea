@@ -1,0 +1,26 @@
+To Do:
+
+Bugs:
+  Add check to make sure we're not selecting something like beforeend since that's an output only rule
+
+Features:
+  Add ability to select properties
+  Events update / overhaul
+  Loading update / overhaul
+  Error update / overhaul
+  Create aliases in a config file for certain common actions
+
+Housekeeping:
+  Move controllers directory into examples and adjust the .gitignore
+  Rename references to GX to be ReCyclr JS related
+
+Documentation:
+
+  Grab original concepts and format into documentation
+
+Examples:
+
+  Build a chat 
+  Show multiple updates with one request
+  Show chaining requests
+  Show polling requests
