@@ -1,2 +1,3 @@
-./example/static/
-example/static
+example/static/*.js
+example/static/inc/*.js
+example/static/controllers/*.js
