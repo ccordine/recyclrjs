@@ -1,6 +1,6 @@
 
 
-class GX {
+export default class GX {
 
   history = false // allow for updating the location / history of the browser
   debug = false // allow for debugging code
@@ -678,4 +678,4 @@ class Location {
 
 }
 
-module.exports = GX
+// module.exports = GX
