@@ -1,22 +1,27 @@
 To Do:
 
-Bugs:
-  Add check to make sure we're not selecting something like beforeend since that's an output only rule
+  Bugs:
+    Add check to make sure we're not selecting something like beforeend since that's an output only rule
 
-Features:
-  Add ability to select properties
-  Events update / overhaul
-  Loading update / overhaul
-  Error update / overhaul
-  Create aliases in a config file for certain common actions
+  Features:
+    Add ability to select properties
+    Events update / overhaul
+    Loading update / overhaul
+    Error update / overhaul
+    Create aliases in a config file for certain common actions
 
-Housekeeping:
-  Move controllers directory into examples and adjust the .gitignore
-  Rename references to GX to be ReCyclr JS related
+  Housekeeping:
+    Move controllers directory into examples and adjust the .gitignore
+    Rename references to GX to be ReCyclr JS related
 
-Documentation:
+  Documentation:
 
-  Grab original concepts and format into documentation
+    Grab original concepts and format into documentation
+
+Ideas:
+  Move init logic from controllers to the base package, maybe...
+  I forgot another idea, something automatic something
+  Add ability to have things overridden by response headers
 
 Examples:
 
@@ -24,3 +29,5 @@ Examples:
   Show multiple updates with one request
   Show chaining requests
   Show polling requests
+  Build an adventure game
+  Stacking Modals and updating underlying items
