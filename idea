@@ -31,3 +31,16 @@ Examples:
   Show polling requests
   Build an adventure game
   Stacking Modals and updating underlying items
+
+
+Plan:
+
+  Add support for;
+    success
+    error
+    200
+    404
+    500
+    etc...
+    
+  Lock in select target see bugs entry

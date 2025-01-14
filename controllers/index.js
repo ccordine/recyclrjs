@@ -7,18 +7,18 @@ class GXController {
 
   connection = null
   keys = [
-      'history',
-      'debug',
-      'dispatch',
-      'method',
-      'url',
-      'form',
-      'selection',
-      'identifier',
-      'loading',
-      'error',
-      'disable',
-      'data'
+    'history',
+    'debug',
+    'dispatch',
+    'method',
+    'url',
+    'form',
+    'selection',
+    'identifier',
+    'loading',
+    'error',
+    'disable',
+    'data'
   ]
   createGX(data = {}) {
     let d = {}
@@ -31,18 +31,20 @@ class GXController {
   generate(event) {
     console.log("generate")
     console.log(event)
-    if(!event) {
+    if (!event) {
       return console.error("no event found")
     }
 
-    const {currentTarget}= event
+    event.preventDefault()
+
+    const { currentTarget } = event
     return new GXHelper(currentTarget)
   }
-  debug(){
+  debug() {
     console.log("debug")
   }
 
- setup() {
+  setup() {
     console.log('recyclr setup')
     const actions = ["click"]
     const a = {
@@ -53,11 +55,11 @@ class GXController {
       let elements = document.querySelectorAll(`[recyclr=${action}]`)
       console.log(elements)
       Array.from(elements).forEach(element => {
-          console.log(element)
-          console.log(a[action])
+        console.log(element)
+        console.log(a[action])
         // console.log(element.addEventListener)
-          // element[`on${action}`] = a[action]
-          element.addEventListener(action, a[action])
+        // element[`on${action}`] = a[action]
+        element.addEventListener(action, a[action])
       });
     });
 
@@ -66,56 +68,56 @@ class GXController {
 
 
 class GXHelper {
-    constructor(element) {
-        let {
-            gxSelect, // *
-            gxUrl, // *
-            gxMethod,
-            gxHistory,
-            gxDebug,
-            gxForm,
-            // gxDispatch,
-            // gxIdentifier,
-            gxLoading,
-            gxError,
-            gxDisable
-        } = element.dataset
+  constructor(element) {
+    let {
+      gxSelect, // *
+      gxUrl, // *
+      gxMethod,
+      gxHistory,
+      gxDebug,
+      gxForm,
+      // gxDispatch,
+      // gxIdentifier,
+      gxLoading,
+      gxError,
+      gxDisable
+    } = element.dataset
 
-        let { href, action, method, name, value } = element
-        let form = null
-        if (gxForm !== null) form = document.querySelector(gxForm)
-        if (form == null && element.tagName == 'FORM') form = element
-        console.log('gxForm:' + JSON.stringify(gxForm))
-        console.log('Form:' + JSON.stringify(form))
-        console.log('Element Tag:' + element.tagName)
-        let data = null
-        if (name !== null && value !== null) {
-            data = {}
-            data[name] = value
-        }
-        const gx = new GX({
-            method: gxMethod ?? method ?? 'get',
-            url: gxUrl ?? href ?? action,
-            debug: gxDebug ?? false,
-            // dispatch: gxDispatch,
-            dispatch: 'on',
-            form: form,
-            selection: gxSelect,
-            // identifier: gxIdentifier,
-            identifier: 'gx',
-            loading: gxLoading ?? null,
-            error: gxError ?? null,
-            disable: gxDisable ?? null,
-            history: gxHistory ?? 'on',
-            data: data
-        })
-        gx.request()
+    let { href, action, method, name, value } = element
+    let form = null
+    if (gxForm !== null) form = document.querySelector(gxForm)
+    if (form == null && element.tagName == 'FORM') form = element
+    console.log('gxForm:' + JSON.stringify(gxForm))
+    console.log('Form:' + JSON.stringify(form))
+    console.log('Element Tag:' + element.tagName)
+    let data = null
+    if (name !== null && value !== null) {
+      data = {}
+      data[name] = value
     }
+    const gx = new GX({
+      method: gxMethod ?? method ?? 'get',
+      url: gxUrl ?? href ?? action,
+      debug: gxDebug ?? false,
+      // dispatch: gxDispatch,
+      dispatch: 'on',
+      form: form,
+      selection: gxSelect,
+      // identifier: gxIdentifier,
+      identifier: 'gx',
+      loading: gxLoading ?? null,
+      error: gxError ?? null,
+      disable: gxDisable ?? null,
+      history: gxHistory ?? 'on',
+      data: data
+    })
+    gx.request()
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Connected...')
 
-const recyclr = new GXController()
+  const recyclr = new GXController()
   recyclr.setup()
 })
