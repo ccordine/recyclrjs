@@ -28,7 +28,14 @@ class GX {
         disable,
         data
     }) {
-
+        window.addEventListener('popstate', function(event) {
+            if (event.state) {
+                window.location.href = event.state.path; // Load the previous page
+            } else {
+                window.history.back(); // Let the browser handle it
+            }
+            location.reload(); // Reloads the previous page when going back
+        });
         if (this.validate({
             debug: {
                 type: 'string',
