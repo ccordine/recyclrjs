@@ -29,11 +29,6 @@ class GX {
         data
     }) {
         window.addEventListener('popstate', function(event) {
-            if (event.state) {
-                window.location.href = event.state.path; // Load the previous page
-            } else {
-                window.history.back(); // Let the browser handle it
-            }
             location.reload(); // Reloads the previous page when going back
         });
         if (this.validate({
@@ -143,7 +138,52 @@ class GX {
         this.data = data ?? null
 
     }
+
+    fixQueryString(url) {
+        console.log(url)
+        // Replace all question marks with ampersands
+        let fixedUrl = url.replace('amp;', '');
+        fixedUrl = fixedUrl.replace(/\?/g, '&');
+
+        // Replace the first ampersand with a question mark
+        fixedUrl = fixedUrl.replace('&', '?');
+
+        let parts = fixedUrl.split('?')
+        let base = parts[0]
+        let data = {}
+        let newUrl = fixedUrl
+
+        if (parts.length > 1) {
+            let subject = parts[1]
+            let params = subject.split('&')
+            params.forEach(param => {
+                let p = param.split('=')
+                let key = p[0]
+                let value = p[1]
+                if (key != null && value != null && key != '' && value != '' && key != 'undefined' && key != undefined && value != 'undefined' && value != undefined) {
+                    key = key.replace('amp;', '')
+                    value = value.replace('amp;', '')
+                    data[key] = value
+                }
+            });
+        }
+        if (data != {}) {
+            let keys = Object.keys(data)
+            if (keys.length > 0) {
+                newUrl = base + '?'
+                keys.forEach((key, index) => {
+                    if (index > 0) newUrl = newUrl + '&'
+                    newUrl = newUrl + key + '=' + data[key]
+                })
+            }
+        }
+
+        console.log(newUrl)
+        return newUrl;
+    }
+
     async request() {
+        console.log('request')
         // How will we determine the request method?
         // gx-get? gx-method? something else?
         /**
@@ -217,6 +257,8 @@ class GX {
         // show the loading target
         // hide all relevant event targets
 
+        this.url = this.fixQueryString(this.url)
+
         try {
 
 
@@ -244,6 +286,7 @@ class GX {
                     case 'get':
                         const queryString = new URLSearchParams(formData).toString();
                         this.url += `?${queryString}`
+                        this.url = this.fixQueryString(this.url)
                         break;
                     default:
                         console.error(`No actionable case...`)
@@ -257,13 +300,13 @@ class GX {
                 console.log('selection:')
                 console.log(this.selection)
                 if (response.redirected) {
-                    // console.log('this has been redirected')
+                    console.log('this has been redirected')
                     condition = 'redirect'
                 }
                 if (!response.ok) {
                     condition = 'error'
                     // new Error('Network response was not ok ' + response.statusText);
-                    // console.error('There was a problem with the fetch operation');
+                    console.error('There was a problem with the fetch operation');
                 }
                 this.url = response.url
                 return response.text(); // Get the response as text (HTML)
@@ -415,7 +458,7 @@ class GX {
         // render / querySelector the html in js, for each event in the parseMap, find the selection from the html, then update our targets in the dom
         // make sure all the javascript events are being added to the content
         let events = this.parse(select)
-        console.log(events)
+
         if (events != null) {
             events = events.filter(item => {
                 return item.condition == condition
@@ -433,10 +476,6 @@ class GX {
             }
             let { selector, location } = selection
 
-            console.log('selector')
-            console.log(selector)
-            console.log('location')
-            console.log(location)
             //
             // Determine if location is looking for properties ie: [name, href, data-label]
             //
@@ -465,6 +504,7 @@ class GX {
                 // Here we need to find the outputs, and load them in, then return early so it's not replaced or put into my selections
                 return false;
             }
+
             target.selection = doc.querySelector(selector)[L.string]
             selections.push(target)
         })
