@@ -229,6 +229,9 @@ class GX {
          *
          */
         console.log('show loading here...')
+        if(this.loading) {
+            this.handleShowSpinner()
+        }
         let valid = this.validate({
             // form: {
             // type:'object',
@@ -361,6 +364,26 @@ class GX {
             // show all relevant event targets
             // show the error target
 
+        }
+        if(this.loading) {
+            this.handleHideSpinner()
+        }
+    }
+    handleShowSpinner() {
+        console.log('showing spinner')
+        console.log(this.loading)
+        let spinner = document.querySelector(this.loading)
+        if(spinner) {
+            spinner.style.display = 'block'
+        }
+    }
+
+    handleHideSpinner() {
+        console.log('hiding spinner')
+        console.log(this.loading)
+        let spinner = document.querySelector(this.loading)
+        if(spinner) {
+            spinner.style.display = 'none'
         }
     }
 
