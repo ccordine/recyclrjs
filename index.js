@@ -14,6 +14,8 @@ class GX {
     error = null // selector query string, show error
     disable = null // selector query string, disable all targets
     data = null // add in data from submit buttons or stuff
+    presets = null
+    config = null
     constructor({
         history,
         debug,
@@ -26,11 +28,23 @@ class GX {
         loading,
         error,
         disable,
-        data
+        data,
+        config,
+        presets
     }) {
         window.addEventListener('popstate', function(event) {
             location.reload(); // Reloads the previous page when going back
         });
+
+
+        if (this.validate({
+            config: {
+                type: 'object',
+                value: config,
+                // instance: HTMLElement not available in node
+            }
+        }, true)) this.config = config
+
         if (this.validate({
             debug: {
                 type: 'string',
@@ -44,6 +58,25 @@ class GX {
             if (debug == 'on') this.debug = true
         }
 
+        if (this.validate({
+            presets: {
+                type: 'string',
+                value: presets
+            }
+        })) this.presets = presets.split(' ');
+
+        if (this.presets != null && this.presets.length > 0 && this.config != null && this.config.presets != {}) {
+            if (selection == null) {
+                selection = ''
+            }
+            let selections = selection.split(' ');
+            this.presets.forEach(preset => {
+                if (this.config.presets[preset] ?? false) {
+                    selections.push(this.config.presets[preset])
+                }
+            });
+            selection = selections.filter(item => item != '').join(' ')
+        }
 
         if (this.validate({
             selection: {
@@ -136,7 +169,6 @@ class GX {
         }
 
         this.data = data ?? null
-
     }
 
     fixQueryString(url) {
@@ -229,7 +261,7 @@ class GX {
          *
          */
         console.log('show loading here...')
-        if(this.loading) {
+        if (this.loading) {
             this.handleShowSpinner()
         }
         let valid = this.validate({
@@ -365,7 +397,7 @@ class GX {
             // show the error target
 
         }
-        if(this.loading) {
+        if (this.loading) {
             this.handleHideSpinner()
         }
     }
@@ -373,7 +405,7 @@ class GX {
         console.log('showing spinner')
         console.log(this.loading)
         let spinner = document.querySelector(this.loading)
-        if(spinner) {
+        if (spinner) {
             spinner.style.display = 'block'
         }
     }
@@ -382,7 +414,7 @@ class GX {
         console.log('hiding spinner')
         console.log(this.loading)
         let spinner = document.querySelector(this.loading)
-        if(spinner) {
+        if (spinner) {
             spinner.style.display = 'none'
         }
     }
