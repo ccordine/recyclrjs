@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "fallback": "body",
+  "triggers": {
+    "redirect": [
+      "body"
+    ],
+    "status:422": [
+      "toast"
+    ],
+    "status:401": [
+      "modalLogin"
+    ]
+  },
+  "presets": {
+    "body": "body@innerHTML -> body@innerHTML",
+    "modal": [
+      ".modal@outerHTML -> #modal-manager@afterbegin",
+      "literal('{\"open\":true}') -> #modal-manager@data-recyclr"
+    ],
+    "toast": ".flash@innerHTML -> #toast@innerHTML",
+    "modalLogin": ".modal-login@outerHTML -> #modal-manager@afterbegin"
+  }
+}
