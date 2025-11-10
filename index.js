@@ -1036,3 +1036,224 @@ function applyBusyState(root, busy) {
     }
 }
 // --- end busy/disable helpers ---
+
+
+// ==============================
+// Realtime (WebSocket / SSE)
+// ==============================
+
+// Attach a helper on GX to consume a realtime message that carries HTML + directives.
+GX.prototype.consumeRealtime = async function(message = {}) {
+    try {
+        const html = message && typeof message.html === 'string' ? message.html : '';
+        if (!html) { __recyclrDebugLog(this, 'consumeRealtime: empty html, ignoring'); return; }
+
+        // Build a pseudo-response so evaluateWithPresets can reuse header-based logic
+        const headerMap = new Map();
+        if (message.presets) {
+            const arr = Array.isArray(message.presets) ? message.presets : String(message.presets).split(/[;, ]+/);
+            headerMap.set('Recyclr-Use-Presets', arr.filter(Boolean).join(','));
+        }
+        if (message.eventName) headerMap.set('Recyclr-Event', message.eventName);
+
+        const pseudoRes = {
+            status: message.status ?? 200,
+            redirected: !!message.redirected,
+            headers: { get: (k) => headerMap.get(k) }
+        };
+
+        let events = [];
+
+        // If explicit routing rules are provided, prefer those.
+        if (Array.isArray(message.rules) && message.rules.length) {
+            const selection = message.rules.join(' ');
+            events = this.evaluate(html, selection, message.condition ?? null) || [];
+        } else {
+            // Otherwise, let presets/triggers decide. Fall back to the instance's selection.
+            const selection = this.selection || 'body@innerHTML->body@innerHTML';
+            events = await this.evaluateWithPresets(pseudoRes, html, selection, message.condition ?? null);
+        }
+
+        if (!events || !events.length) {
+            __recyclrDebugLog(this, 'consumeRealtime: no events produced');
+            return;
+        }
+
+        this.render(events);
+
+        if (this.dispatch && this.validate({ identifier: { type: 'string', value: this.identifier } }, true)) {
+            const ev = headerMap.get('Recyclr-Event') || 'updated';
+            this.handleDispatch(ev, { target: document, bubbles: true });
+        }
+    } catch (e) {
+        __recyclrDebugLog(this, 'consumeRealtime failed', e);
+    }
+};
+
+// Lightweight, dependency-free realtime connector with WS primary, SSE fallback.
+function createRecyclrStream(options = {}) {
+    const cfg = Object.assign({
+        wsUrl: null,
+        sseUrl: null,
+        topics: [],                // array of strings
+        token: null,               // static token string
+        tokenProvider: null,       // async () => token
+        heartbeatMs: 25000,
+        backoffBaseMs: 500,
+        backoffMaxMs: 30000,
+        debug: false,
+        gx: null,                  // optional GX instance to receive messages
+        onMessage: null            // optional custom handler (msg, ctx) => void
+    }, options || {});
+
+    let ws = null;
+    let es = null;
+    let stopped = false;
+    let attempt = 0;
+    let lastSeenId = null;
+    let hbTimer = null;
+    let connectedType = null;
+
+    function log(...args) { if (cfg.debug) try { console.log('[recyclr:rt]', ...args); } catch (_) {} }
+
+    function buildQuery() {
+        const params = new URLSearchParams();
+        if (cfg.topics && cfg.topics.length) params.set('topics', cfg.topics.join(','));
+        if (lastSeenId) params.set('last_id', String(lastSeenId));
+        return params.toString();
+    }
+
+    async function buildToken() {
+        try {
+            return cfg.token || (cfg.tokenProvider ? await cfg.tokenProvider() : null);
+        } catch (_) { return null; }
+    }
+
+    function handleMessage(raw, ctx) {
+        try {
+            let obj = null;
+            if (typeof raw === 'string') {
+                obj = JSON.parse(raw);
+            } else if (raw && typeof raw.data === 'string') {
+                obj = JSON.parse(raw.data);
+            } else if (typeof raw === 'object') {
+                obj = raw;
+            }
+
+            if (!obj || typeof obj !== 'object') return;
+            if (obj.id != null) lastSeenId = obj.id;
+            if (cfg.onMessage) cfg.onMessage(obj, ctx);
+            if (cfg.gx && typeof cfg.gx.consumeRealtime === 'function') {
+                cfg.gx.consumeRealtime(obj);
+            }
+        } catch (e) {
+            log('message parse error', e);
+        }
+    }
+
+    function scheduleReconnect() {
+        if (stopped) return;
+        attempt += 1;
+        const delay = Math.min(cfg.backoffMaxMs, cfg.backoffBaseMs * Math.pow(2, attempt)) * (0.7 + Math.random()*0.6);
+        log('reconnecting in', Math.round(delay), 'ms');
+        setTimeout(connect, delay);
+    }
+
+    function clearHeartbeat() { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } }
+
+    async function connectWS() {
+        const t = await buildToken();
+        const q = buildQuery();
+        const url = new URL(cfg.wsUrl, window.location.href);
+        if (q) url.search = q + (t ? `&token=${encodeURIComponent(t)}` : (url.search ? '' : ''));
+        else if (t) url.search = `token=${encodeURIComponent(t)}`;
+
+        log('connecting WS', url.toString());
+        try {
+            ws = new WebSocket(url.toString());
+        } catch (e) {
+            log('WS ctor failed', e);
+            ws = null;
+            return false;
+        }
+
+        ws.onopen = () => {
+            connectedType = 'ws';
+            attempt = 0;
+            log('WS open');
+            clearHeartbeat();
+            hbTimer = setInterval(() => {
+                try { ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: 'ping', ts: Date.now() })); } catch (_) {}
+            }, cfg.heartbeatMs);
+        };
+
+        ws.onmessage = (ev) => handleMessage(ev, { transport: 'ws' });
+        ws.onerror = (ev) => log('WS error', ev);
+        ws.onclose = () => {
+            log('WS close');
+            clearHeartbeat();
+            ws = null;
+            if (!stopped) scheduleReconnect();
+        };
+        return true;
+    }
+
+    async function connectSSE() {
+        if (!cfg.sseUrl) return false;
+        const t = await buildToken();
+        const q = buildQuery();
+        const url = new URL(cfg.sseUrl, window.location.href);
+        if (q) url.search = q + (t ? `&token=${encodeURIComponent(t)}` : (url.search ? '' : ''));
+        else if (t) url.search = `token=${encodeURIComponent(t)}`;
+
+        log('connecting SSE', url.toString());
+        try {
+            es = new EventSource(url.toString(), { withCredentials: true });
+        } catch (e) {
+            log('SSE ctor failed', e);
+            es = null;
+            return false;
+        }
+        connectedType = 'sse';
+        attempt = 0;
+
+        es.onmessage = (ev) => handleMessage(ev, { transport: 'sse' });
+        es.onerror = (ev) => {
+            log('SSE error', ev);
+            try { es && es.close(); } catch (_) {}
+            es = null;
+            if (!stopped) scheduleReconnect();
+        };
+        return true;
+    }
+
+    async function connect() {
+        if (stopped) return;
+        clearHeartbeat();
+
+        // Prefer WS if available
+        if (cfg.wsUrl) {
+            const ok = await connectWS();
+            if (ok && ws) return;
+        }
+        // Fallback to SSE
+        await connectSSE();
+    }
+
+    function stop() {
+        stopped = true;
+        clearHeartbeat();
+        try { ws && ws.close(); } catch (_) {}
+        try { es && es.close(); } catch (_) {}
+        ws = null; es = null;
+        connectedType = null;
+    }
+
+    // Public API
+    return {
+        start: () => { stopped = false; attempt = 0; connect(); },
+        stop,
+        isConnected: () => !!(ws && ws.readyState === 1) || !!es,
+        transport: () => connectedType
+    };
+}
