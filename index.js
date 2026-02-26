@@ -1,4 +1,215 @@
 
+// --- recyclr: presets storage cache (TTL) ------------------------------------
+function __recyclrStorageAvailable() {
+    try {
+        const x = '__recyclr__' + Math.random().toString(36).slice(2);
+        window.localStorage.setItem(x, '1');
+        window.localStorage.removeItem(x);
+        return true;
+    } catch (_) { return false; }
+}
+
+function __recyclrPresetsCacheKey(url) {
+    return `recyclr:presets:${url}`;
+}
+
+function __recyclrReadPresetsCache(url, ttlMs) {
+    if (!__recyclrStorageAvailable()) return null;
+    try {
+        const raw = window.localStorage.getItem(__recyclrPresetsCacheKey(url));
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (!obj || typeof obj !== 'object') return null;
+        const now = Date.now();
+        if (typeof obj.ts !== 'number' || (ttlMs > 0 && (now - obj.ts) > ttlMs)) {
+            return null;
+        }
+        return obj.data || null;
+    } catch (_) { return null; }
+}
+
+function __recyclrWritePresetsCache(url, data) {
+    if (!__recyclrStorageAvailable()) return;
+    try {
+        const obj = { ts: Date.now(), data };
+        window.localStorage.setItem(__recyclrPresetsCacheKey(url), JSON.stringify(obj));
+    } catch (_) { }
+}
+
+async function __recyclrLoadPresetsWithCache(url, ttlMs) {
+    // Try cache first
+    const cached = __recyclrReadPresetsCache(url, ttlMs);
+    if (cached) { return { data: cached, fromCache: true }; }
+    // Otherwise fetch and cache
+    try {
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) return { data: null, fromCache: false };
+        const data = await res.json();
+        __recyclrWritePresetsCache(url, data);
+        return { data, fromCache: false };
+    } catch (_) {
+        return { data: null, fromCache: false };
+    }
+}
+// --- end storage cache --------------------------------------------------------
+
+
+// --- Recyclr Presets system --------------------------------------------------
+function __recyclrParseRule(ruleStr) {
+    // "<srcSel>@<srcLoc> -> <dstSel>@<dstLoc>" OR 'literal("...") -> <dstSel>@<dstLoc>'
+    const parts = String(ruleStr || '').split(/->/);
+    if (parts.length !== 2) return null;
+    const L = parts[0].trim();
+    const R = parts[1].trim();
+    const mR = R.match(/^(?<dst>.+?)@(?<dstLoc>[a-zA-Z][\w-]*)$/);
+    if (!mR) return null;
+    const right = { dst: mR.groups.dst.trim(), dstLoc: mR.groups.dstLoc.trim() };
+
+    const lit = L.match(/^literal\((?<lit>.*)\)$/i);
+    if (lit) {
+        let v = lit.groups.lit.trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+        return { literal: v, ...right };
+    }
+
+    const mL = L.match(/^(?<src>.+?)@(?<srcLoc>[a-zA-Z][\w-]*)$/);
+    if (!mL) return null;
+    return { src: mL.groups.src.trim(), srcLoc: mL.groups.srcLoc.trim(), ...right };
+}
+
+function __recyclrNormalizeLoc(loc) {
+    switch ((loc || 'innerHTML')) {
+        case 'text': return 'textContent';
+        case 'append': return 'beforeend';
+        default: return loc;
+    }
+}
+
+async function __recyclrLoadPresetsExternal(url) {
+    try {
+        const res = await fetch(url, { credentials: 'same-origin' });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch (_) { return null; }
+}
+
+function __recyclrBuildEventsFromPresetRules(html, rules) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const events = [];
+    for (const rule of (rules || [])) {
+        let selection = '';
+        if (typeof rule.literal === 'string') {
+            selection = rule.literal;
+        } else if (rule.src) {
+            const node = doc.querySelector(rule.src);
+            if (!node) { __recyclrDebugLog(this, 'preset src missing', rule.src); continue; }
+            const srcLoc = __recyclrNormalizeLoc(rule.srcLoc || 'innerHTML');
+            if (srcLoc === 'outerHTML') selection = node.outerHTML;
+            else if (srcLoc === 'textContent') selection = node.textContent;
+            else selection = node.innerHTML;
+        } else {
+            __recyclrDebugLog(this, 'preset rule invalid', rule); continue;
+        }
+        const dstLoc = __recyclrNormalizeLoc(rule.dstLoc || 'innerHTML');
+        events.push({ selector: rule.dst, location: dstLoc, selection });
+    }
+    return events;
+}
+// --- end presets system ------------------------------------------------------
+
+
+// --- recyclr: debug utility ---
+function __recyclrDebugLog(ctx, ...args) {
+    try {
+        const debugOn = !!(ctx && (ctx.debug || (ctx.config && ctx.config.debug)));
+        if (debugOn && typeof console !== 'undefined' && console.log) {
+            console.log('[recyclr]', ...args);
+        }
+    } catch (e) {
+        /* no-op */
+    }
+}
+// --- end debug utility ---
+
+// --- recyclr: global loading overlay ---
+const RECYCLR_GLOBAL_LOADING_KEY = '__recyclrGlobalLoadingStateV1';
+const RECYCLR_GLOBAL_LOADING_SELECTOR = '#gx-global-loading-indicator';
+
+function __recyclrGlobalRef() {
+    if (typeof window !== 'undefined') return window;
+    if (typeof globalThis !== 'undefined') return globalThis;
+    return null;
+}
+
+function __recyclrGlobalLoadingState() {
+    const ref = __recyclrGlobalRef();
+    if (!ref) {
+        return { activeCount: 0 };
+    }
+
+    if (!ref[RECYCLR_GLOBAL_LOADING_KEY] || typeof ref[RECYCLR_GLOBAL_LOADING_KEY] !== 'object') {
+        ref[RECYCLR_GLOBAL_LOADING_KEY] = { activeCount: 0 };
+    }
+
+    return ref[RECYCLR_GLOBAL_LOADING_KEY];
+}
+
+function __recyclrSetGlobalLoadingVisible(visible) {
+    try {
+        const target = document.querySelector(RECYCLR_GLOBAL_LOADING_SELECTOR);
+        if (!target) return;
+
+        const show = !!visible;
+        target.classList.toggle('hidden', !show);
+        target.classList.toggle('flex', show);
+        target.setAttribute('aria-hidden', show ? 'false' : 'true');
+    } catch (_) { }
+}
+
+function __recyclrBeginGlobalLoading() {
+    const state = __recyclrGlobalLoadingState();
+    state.activeCount = Math.max(0, (state.activeCount || 0)) + 1;
+    __recyclrSetGlobalLoadingVisible(true);
+}
+
+function __recyclrEndGlobalLoading() {
+    const state = __recyclrGlobalLoadingState();
+    state.activeCount = Math.max(0, (state.activeCount || 0) - 1);
+    __recyclrSetGlobalLoadingVisible(state.activeCount > 0);
+}
+// --- end global loading overlay ---
+
+// --- recyclr: preserve scroll utility ---
+function __recyclrCaptureScroll(root) {
+    const map = new Map();
+    try {
+        if (!(root instanceof Element)) return map;
+        const nodes = [];
+        if (root.hasAttribute && root.hasAttribute('data-gx-preserve-scroll')) {
+            nodes.push(root);
+        }
+        root.querySelectorAll && root.querySelectorAll('[data-gx-preserve-scroll]').forEach(n => nodes.push(n));
+        nodes.forEach(node => {
+            const key = node.getAttribute('data-gx-preserve-scroll') || node.id;
+            if (!key) return;
+            map.set(key, node.scrollTop);
+        });
+    } catch (_) { }
+    return map;
+}
+
+function __recyclrRestoreScroll(map) {
+    try {
+        if (!map || map.size === 0) return;
+        map.forEach((scrollTop, key) => {
+            const node = document.querySelector(`[data-gx-preserve-scroll="${key}"]`) || document.getElementById(key);
+            if (node) node.scrollTop = scrollTop;
+        });
+    } catch (_) { }
+}
+// --- end preserve scroll utility ---
+
 
 class GX {
 
@@ -13,6 +224,7 @@ class GX {
     loading = null // selector query string, show spinner
     error = null // selector query string, show error
     disable = null // selector query string, disable all targets
+    background = false // background requests skip global loading overlay
     data = null // add in data from submit buttons or stuff
     presets = null
     config = null
@@ -28,14 +240,31 @@ class GX {
         loading,
         error,
         disable,
+        background,
         data,
         config,
-        presets
+        presets,
+        presetsUrl,
+        presetsTTLMs
     }) {
-        window.addEventListener('popstate', function(event) {
-            location.reload(); // Reloads the previous page when going back
-        });
 
+        const __recyclrHistoryOn = (history === 'on' || history === true);
+        if (__recyclrHistoryOn) {
+            try {
+                if (typeof window !== 'undefined' && !window.__recyclrPopstateBound) {
+                    window.__recyclrPopstateBound = true;
+                    window.addEventListener('popstate', () => location.reload(), { passive: true });
+                }
+            } catch (_) {
+                /* no-op */
+            }
+        }
+
+        // Accept boolean flags too (a lot of call sites pass true/false)
+        if (typeof debug === 'boolean') this.debug = debug;
+        if (typeof dispatch === 'boolean') this.dispatch = dispatch;
+        if (typeof history === 'boolean') this.history = history;
+        if (typeof background === 'boolean') this.background = background;
 
         if (this.validate({
             config: {
@@ -45,7 +274,12 @@ class GX {
             }
         }, true)) this.config = config
 
-        if (this.validate({
+        
+
+        // Allow passing presetsUrl/presetsTTLMs directly; store on config for evaluateWithPresets()
+        if (this.config && typeof presetsUrl === 'string' && presetsUrl.length) this.config.presetsUrl = presetsUrl;
+        if (this.config && typeof presetsTTLMs === 'number') this.config.presetsTTLMs = presetsTTLMs;
+if (this.validate({
             debug: {
                 type: 'string',
                 value: debug,
@@ -58,14 +292,16 @@ class GX {
             if (debug == 'on') this.debug = true
         }
 
-        if (this.validate({
+        if (typeof presets === 'string' && this.validate({
             presets: {
                 type: 'string',
                 value: presets
             }
-        })) this.presets = presets.split(' ');
+        })) {
+            this.presets = presets.split(' ');
+        }
 
-        if (this.presets != null && this.presets.length > 0 && this.config != null && this.config.presets != {}) {
+        if (this.presets != null && this.presets.length > 0 && this.config?.presets && Object.keys(this.config.presets).length > 0) {
             if (selection == null) {
                 selection = ''
             }
@@ -155,6 +391,19 @@ class GX {
         }
 
         if (this.validate({
+            background: {
+                type: 'string',
+                value: background,
+                options: [
+                    'on',
+                    'off'
+                ]
+            }
+        }, true)) {
+            this.background = background === 'on'
+        }
+
+        if (this.validate({
             method: {
                 type: 'string',
                 value: method,
@@ -172,50 +421,19 @@ class GX {
     }
 
     fixQueryString(url) {
-        console.log(url)
-        // Replace all question marks with ampersands
-        let fixedUrl = url.replace('amp;', '');
-        fixedUrl = fixedUrl.replace(/\?/g, '&');
-
-        // Replace the first ampersand with a question mark
-        fixedUrl = fixedUrl.replace('&', '?');
-
-        let parts = fixedUrl.split('?')
-        let base = parts[0]
-        let data = {}
-        let newUrl = fixedUrl
-
-        if (parts.length > 1) {
-            let subject = parts[1]
-            let params = subject.split('&')
-            params.forEach(param => {
-                let p = param.split('=')
-                let key = p[0]
-                let value = p[1]
-                if (key != null && value != null && key != '' && value != '' && key != 'undefined' && key != undefined && value != 'undefined' && value != undefined) {
-                    key = key.replace('amp;', '')
-                    value = value.replace('amp;', '')
-                    data[key] = value
-                }
-            });
+        try {
+            const raw = String(url ?? '');
+            const normalized = raw.replace(/&amp;/g, '&');
+            const u = new URL(normalized, window.location.href);
+            return u.toString();
+        } catch (e) {
+            __recyclrDebugLog(this, 'fixQueryString fallback', e);
+            return url;
         }
-        if (data != {}) {
-            let keys = Object.keys(data)
-            if (keys.length > 0) {
-                newUrl = base + '?'
-                keys.forEach((key, index) => {
-                    if (index > 0) newUrl = newUrl + '&'
-                    newUrl = newUrl + key + '=' + data[key]
-                })
-            }
-        }
-
-        console.log(newUrl)
-        return newUrl;
     }
 
     async request() {
-        console.log('request')
+        __recyclrDebugLog(this, 'request')
         // How will we determine the request method?
         // gx-get? gx-method? something else?
         /**
@@ -260,10 +478,6 @@ class GX {
          * I'll also want to do something like how hx-disable, hx-loading, etc, just selectors and attributes to use on the page
          *
          */
-        console.log('show loading here...')
-        if (this.loading) {
-            this.handleShowSpinner()
-        }
         let valid = this.validate({
             // form: {
             // type:'object',
@@ -281,10 +495,19 @@ class GX {
                 type: 'string',
                 value: this.method
             },
-        })
+        }, true)
         if (!valid) {
-            throw console.error('Missing requirements to make a request...')
+            __recyclrDebugLog(this, 'request skipped: missing requirements')
             return false
+        }
+
+        const useGlobalLoading = !this.background;
+        __recyclrDebugLog(this, 'show loading here...', { useGlobalLoading })
+        if (useGlobalLoading) {
+            __recyclrBeginGlobalLoading()
+        }
+        if (this.loading) {
+            this.handleShowSpinner()
         }
 
         // From here we need to:
@@ -324,33 +547,32 @@ class GX {
                         this.url = this.fixQueryString(this.url)
                         break;
                     default:
-                        console.error(`No actionable case...`)
+                        __recyclrDebugLog(this, 'No actionable method case for form', this.method)
                         break
                 }
             }
             let condition = null
-            let html = await fetch(this.url, requestBody).then(response => {
-                console.log('here we need to figure out what the response was')
-                console.log('Status code:', response.status);
-                console.log('selection:')
-                console.log(this.selection)
+            let target = await applyBusyState(this?.target || document, true);
+            let response = await fetch(this.url, requestBody).then(response => {
+                __recyclrDebugLog(this, 'here we need to figure out what the response was')
+                __recyclrDebugLog(this, 'Status code:', response.status);
+                __recyclrDebugLog(this, 'selection:')
+                __recyclrDebugLog(this, this.selection)
                 if (response.redirected) {
-                    console.log('this has been redirected')
+                    __recyclrDebugLog(this, 'this has been redirected')
                     condition = 'redirect'
                 }
                 if (!response.ok) {
                     condition = 'error'
-                    // new Error('Network response was not ok ' + response.statusText);
-                    console.error('There was a problem with the fetch operation');
+                    __recyclrDebugLog(this, 'fetch returned non-ok response', response.status);
                 }
                 this.url = response.url
-                return response.text(); // Get the response as text (HTML)
+                return response; // Get the response as text (HTML)
             })
+            let html = await response.text()
+            let res = response
 
-            console.log('hide loading here...')
-            // console.log('html start')
-            // console.log(html)
-            // console.log('html end')
+            __recyclrDebugLog(this, 'hide loading here...')
             valid = this.validate({
                 html: {
                     type: 'string',
@@ -360,22 +582,23 @@ class GX {
                     type: 'string',
                     value: this.selection
                 }
-            })
+            }, true)
 
             if (!valid) {
-                throw console.error('Missing requirements to evaluate the response ...')
+                __recyclrDebugLog(this, 'request skipped: invalid response payload for evaluation')
                 return false
             }
 
             // console.log('evaluating...')
-            const events = this.evaluate(html, this.selection, condition)
+            const events = await this.evaluateWithPresets(res, html, this.selection, condition)
             // console.log('evaluated...')
 
-            if (events.length <= 0) {
-                throw console.error(`No changes were returned... Selection:${this.selection}`)
+            if (!Array.isArray(events) || events.length <= 0) {
+                __recyclrDebugLog(this, `No changes were returned... Selection:${this.selection}`)
+                return true
             }
 
-            // console.log('rendering...');
+            // __recyclrDebugLog(this, 'rendering...');
             this.render(events)
             // console.log('rendered...')
             // From here we need to:
@@ -384,26 +607,32 @@ class GX {
             // show all relevant event targets
             // update the history
             if (this.history) {
-                history.pushState(null, 'Page Title', this.url);
+                const historyUrl = (res && typeof res.url === 'string' && res.url.trim() !== '')
+                    ? res.url
+                    : this.url;
+                history.pushState(null, 'Page Title', historyUrl);
             }
 
         } catch (err) {
-            console.error('An error has occurred while processing this request...')
-            console.error(err)
+            __recyclrDebugLog(this, 'An error has occurred while processing this request...', err)
             // From here we need to:
             // enable all disable targets
             // hide the loading target(s)
             // show all relevant event targets
             // show the error target
 
-        }
-        if (this.loading) {
-            this.handleHideSpinner()
+        } finally {
+            if (this.loading) {
+                this.handleHideSpinner()
+            }
+            if (useGlobalLoading) {
+                __recyclrEndGlobalLoading()
+            }
         }
     }
     handleShowSpinner() {
-        console.log('showing spinner')
-        console.log(this.loading)
+        __recyclrDebugLog(this, 'showing spinner')
+        __recyclrDebugLog(this, this.loading)
         let spinner = document.querySelector(this.loading)
         if (spinner) {
             spinner.style.display = 'block'
@@ -411,8 +640,8 @@ class GX {
     }
 
     handleHideSpinner() {
-        console.log('hiding spinner')
-        console.log(this.loading)
+        __recyclrDebugLog(this, 'hiding spinner')
+        __recyclrDebugLog(this, this.loading)
         let spinner = document.querySelector(this.loading)
         if (spinner) {
             spinner.style.display = 'none'
@@ -420,42 +649,147 @@ class GX {
     }
 
     render(events) {
+        if (!Array.isArray(events) || events.length === 0) {
+            return;
+        }
         // console.log('rendering')
         // Parse through the events, they'll have multiple properties, we'll document.querySelector the target, and place in the new value
         // events [] = target { selector, location, selection }
         // console.log(events)
         events.forEach(event => {
-            let { selector, location, selection } = event
-
-            let target = document.querySelector(selector)
-            if (target == null || target == undefined) {
-                throw console.error('Could not find target for selector: ' + selector + '...')
-            }
-            switch (location) {
-                case 'innerHTML':
-                case 'outerHTML':
-                    target[location] = selection
-                    break;
-                case 'beforebegin':
-                case 'afterbegin':
-                case 'beforeend':
-                case 'afterend':
-                    target.insertAdjacentHTML(location, selection)
-                    break;
-                default:
-                    throw console.error(`Invalid location provided... Location:${location}; Selector:${selector}`)
-                    break;
-            }
-
-            if (this.dispatch && this.validate({
-                identifier: {
-                    type: 'string',
-                    value: this.identifier
+            try {
+                let { selector, location, selection } = event ?? {}
+                if (typeof selector !== 'string' || selector.trim() === '') {
+                    __recyclrDebugLog(this, 'render: invalid selector, skipping event', event);
+                    return;
                 }
-            }, true)) {
-                this.handleDispatch('updated', { target: target, bubbles: true })
+                if (typeof location !== 'string' || location.trim() === '') {
+                    __recyclrDebugLog(this, 'render: invalid location, skipping event', event);
+                    return;
+                }
+                if (typeof selection !== 'string') {
+                    selection = selection == null ? '' : String(selection);
+                }
+
+                let target = null;
+                try {
+                    target = document.querySelector(selector);
+                } catch (e) {
+                    __recyclrDebugLog(this, 'render: bad target selector', selector, e);
+                    return;
+                }
+                if (target == null) { __recyclrDebugLog(this, 'render: missing target', selector); return; }
+                const preserved = (location === 'innerHTML' || location === 'outerHTML')
+                    ? __recyclrCaptureScroll(target)
+                    : null;
+                switch (location) {
+                    case 'innerHTML':
+                    case 'outerHTML':
+                        target[location] = selection
+                        break;
+                    case 'beforebegin':
+                    case 'afterbegin':
+                    case 'beforeend':
+                    case 'afterend':
+                        target.insertAdjacentHTML(location, selection)
+                        break;
+                    default:
+                        __recyclrDebugLog(this, `render: invalid location; dropping event. Location:${location}; Selector:${selector}`)
+                        return;
+                }
+
+                if (preserved) {
+                    __recyclrRestoreScroll(preserved);
+                }
+
+                if (this.dispatch && this.validate({
+                    identifier: {
+                        type: 'string',
+                        value: this.identifier
+                    }
+                }, true)) {
+                    this.handleDispatch(this._lastEventName || 'updated', { target: target, bubbles: true })
+                }
+            } catch (e) {
+                __recyclrDebugLog(this, 'render: dropping event after non-fatal error', e, event);
             }
         })
+    }
+
+    async evaluateWithPresets(res, html, selection, condition) {
+        try {
+            // Load presets from config or external file once
+            if (!this._presetsLoaded) {
+                this._presetsLoaded = true;
+                this._presetsConfig = this.config?.presets || null;
+                if (!this._presetsConfig && this.config?.presetsUrl) {
+                    const ttl = (typeof this.config.presetsTTLMs === 'number') ? this.config.presetsTTLMs : 0;
+                    const out = await __recyclrLoadPresetsWithCache(this.config.presetsUrl, ttl);
+                    this._presetsConfig = out.data;
+                }
+            }
+
+            // Decide which presets to use
+            let names = [];
+            const hNames = res?.headers?.get?.('Recyclr-Use-Presets');
+            if (hNames) names = hNames.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+
+            // Triggers by redirect / status
+            try {
+                if (names.length === 0 && this._presetsConfig?.triggers) {
+                    const t = this._presetsConfig.triggers;
+                    if (res?.redirected && Array.isArray(t.redirect)) names = t.redirect.slice();
+                    if (res?.status && t['status:' + res.status]) names = t['status:' + res.status].slice();
+                }
+            } catch (_) { }
+
+            // If none requested, just do normal path
+            if (!this._presetsConfig || names.length === 0) {
+                return this.evaluate(html, selection, condition);
+            }
+
+            // Gather rules for the chosen names
+            const all = this._presetsConfig.presets || {};
+            let rules = [];
+            names.forEach(n => {
+                const spec = all[n];
+                if (!spec) return;
+                if (Array.isArray(spec)) {
+                    spec.forEach(s => rules.push(typeof s === 'string' ? __recyclrParseRule(s) : s));
+                } else if (typeof spec === 'string') {
+                    rules.push(__recyclrParseRule(spec));
+                } else if (typeof spec === 'object') {
+                    rules.push(spec);
+                }
+            });
+            rules = rules.filter(Boolean);
+
+            // If still none, fall back
+            if (rules.length === 0) {
+                if (this._presetsConfig?.fallback && all[this._presetsConfig.fallback]) {
+                    const fb = all[this._presetsConfig.fallback];
+                    const arr = Array.isArray(fb) ? fb : [fb];
+                    arr.forEach(s => rules.push(typeof s === 'string' ? __recyclrParseRule(s) : s));
+                } else {
+                    // Default safe fallback: body -> body
+                    rules.push({ src: 'body', srcLoc: 'innerHTML', dst: 'body', dstLoc: 'innerHTML' });
+                }
+            }
+
+            const events = __recyclrBuildEventsFromPresetRules.call(this, html, rules);
+            if (!Array.isArray(events) || events.length === 0) {
+                __recyclrDebugLog(this, 'presets produced no events; falling back to evaluate()');
+                return this.evaluate(html, selection, condition);
+            }
+
+            // Keep the event name if server provided
+            this._lastEventName = res?.headers?.get?.('Recyclr-Event') || 'updated';
+            this._lastPresetNames = names;
+            return events;
+        } catch (e) {
+            __recyclrDebugLog(this, 'evaluateWithPresets failed', e);
+            return this.evaluate(html, selection, condition);
+        }
     }
 
     parse(s) {
@@ -465,9 +799,15 @@ class GX {
                 value: s,
                 type: 'string'
             }
-        })
-        if (!valid) throw console.error('Invalid arguments given...')
+        }, true)
+        if (!valid) {
+            __recyclrDebugLog(this, 'parse: invalid arguments');
+            return [];
+        }
         let events = s.split(' ').map(event => {
+            if (!event || String(event).trim() === '') {
+                return null;
+            }
 
             let conditionTouple = event.split(':')
             let eventString = null
@@ -482,7 +822,12 @@ class GX {
                     eventString = conditionTouple[1]
                     break;
                 default:
-                    throw console.error('Invalid event properties...')
+                    __recyclrDebugLog(this, 'parse: invalid event properties', event);
+                    return null;
+            }
+            if (!eventString || String(eventString).trim() === '') {
+                __recyclrDebugLog(this, 'parse: empty event string after parsing condition', event);
+                return null;
             }
 
 
@@ -495,12 +840,16 @@ class GX {
                     location: data[1] ?? 'outerHTML'
                 }
             })
+            if (!Array.isArray(d) || d.length < 1 || !d[0]?.selector) {
+                __recyclrDebugLog(this, 'parse: invalid mapping tuple', eventString);
+                return null;
+            }
             return {
                 condition: condition,
                 selection: d[0],
                 target: d[1]
             }
-        })
+        }).filter(Boolean)
         // console.log(events)
         //
         // Add a check here to make sure that the selector for select isn't beforeend or something like that, since that's meaningless and should only be used for the output selector
@@ -512,12 +861,21 @@ class GX {
         // evaluate my parser on response html
         // render / querySelector the html in js, for each event in the parseMap, find the selection from the html, then update our targets in the dom
         // make sure all the javascript events are being added to the content
-        let events = this.parse(select)
+        let events = [];
+        try {
+            events = this.parse(select)
+        } catch (e) {
+            __recyclrDebugLog(this, 'evaluate: parse failed', e);
+            return [];
+        }
 
         if (events != null) {
-            events = events.filter(item => {
-                return item.condition == condition
-            })
+            const matchedEvents = events.filter(item => item.condition == condition)
+            if (condition != null && matchedEvents.length === 0) {
+                events = events.filter(item => item.condition == null)
+            } else {
+                events = matchedEvents
+            }
         }
         const doc = this.parseHTML(html)
         const selections = []
@@ -526,9 +884,7 @@ class GX {
             let { selection, target } = event
             if (target == null || target == undefined) target = selection
 
-            if (target == null || target == undefined) {
-                throw console.error('Could not find target for event: ' + JSON.stringify(event) + '...')
-            }
+            if (target == null) { __recyclrDebugLog(this, 'render: missing target', selection); return; }
             let { selector, location } = selection
 
             //
@@ -548,19 +904,46 @@ class GX {
             */
             // console.log('creating new location... Location:' + location)
             // let L = new Location({ string: location })
-            let L = new Location(location)
+            let L = null
+            try {
+                L = new Location(location)
+            } catch (e) {
+                __recyclrDebugLog(this, 'evaluate: invalid location descriptor', location, e);
+                return;
+            }
 
             // console.log('has properties')
             // console.log(L.properties())
             let properties = Array.from(L.properties() ?? [])
             // console.log(properties)
             if (properties.length) {
-                let response = doc.querySelector(selector)
+                let response = null
+                try {
+                    response = doc.querySelector(selector)
+                } catch (e) {
+                    __recyclrDebugLog(this, 'evaluate: bad source selector for properties', selector, e);
+                    return false;
+                }
+                if (!response) {
+                    __recyclrDebugLog(this, 'render: missing selection source', selector);
+                    return false;
+                }
                 // Here we need to find the outputs, and load them in, then return early so it's not replaced or put into my selections
                 return false;
             }
 
-            target.selection = doc.querySelector(selector)[L.string]
+            let source = null
+            try {
+                source = doc.querySelector(selector)
+            } catch (e) {
+                __recyclrDebugLog(this, 'evaluate: bad source selector', selector, e);
+                return;
+            }
+            if (!source) {
+                __recyclrDebugLog(this, 'render: missing selection source', selector);
+                return;
+            }
+            target.selection = source[L.string]
             selections.push(target)
         })
 
@@ -610,13 +993,10 @@ class GX {
 
         const { bubbles, cancelable, composed } = params
 
-        const target = params.target
+        const target = params.target ?? document
 
         const event = new CustomEvent(fullEventName, {
-            detail: { ...params },
-            target: target,
-            currentTarget: target,
-            bubbles: bubbles ?? true,
+            detail: { ...params }, bubbles: bubbles ?? true,
             cancelable: cancelable ?? true,
             composed: composed ?? true,
         });
@@ -625,7 +1005,7 @@ class GX {
 
     }
     test() {
-        console.log('Running GX tests...')
+        __recyclrDebugLog(this, 'Running GX tests...')
         let tests = {
             validate: () => {
                 let valid = this.validate({
@@ -682,15 +1062,15 @@ class GX {
                 let valid = events.length > 0
                 if (!valid) console.error('Could not validate...')
 
-                console.log(JSON.stringify(events))
+                __recyclrDebugLog(this, JSON.stringify(events))
 
                 events = this.parse('selectionSelector@location->targetSelector@location selectionSelector@location->targetSelector@location')
-                valid = events.length = 2
+                valid = (events.length === 2)
                 if (!valid) console.error('Could not validate...')
 
                 events = this.parse('selectionSelector->targetSelector')
 
-                console.log(JSON.stringify(events))
+                __recyclrDebugLog(this, JSON.stringify(events))
 
                 valid = events.length > 0
                 if (!valid) console.error('Could not validate...')
@@ -699,34 +1079,34 @@ class GX {
                 let events = this.parse('selectionSelector@[name]->targetSelector@location')
                 let valid = events.length > 0
                 if (!valid) console.error('Could not validate...')
-                console.log(JSON.stringify(events))
+                __recyclrDebugLog(this, JSON.stringify(events))
                 let event = events[0]
                 let { selection } = event
                 let { location } = selection
-                console.log('creating new location... Location:' + location)
-                console.log('this one might be wrong, since it is not being passed an object')
+                __recyclrDebugLog(this, 'creating new location... Location:' + location)
+                __recyclrDebugLog(this, 'this one might be wrong, since it is not being passed an object')
                 let L = new Location(location)
-                console.log(L.properties())
+                __recyclrDebugLog(this, L.properties())
             },
             parseManyProps: () => {
                 let events = this.parse('selectionSelector@[name,width,src,dataSocket]->targetSelector@location')
                 let valid = events.length > 0
                 if (!valid) console.error('Could not validate...')
-                console.log(JSON.stringify(events))
+                __recyclrDebugLog(this, JSON.stringify(events))
                 let event = events[0]
                 let { selection } = event
                 let { location } = selection
-                console.log('creating new location... Location:' + location)
-                console.log('this one might be wrong, since it is not being passed an object')
+                __recyclrDebugLog(this, 'creating new location... Location:' + location)
+                __recyclrDebugLog(this, 'this one might be wrong, since it is not being passed an object')
                 let L = new Location(location)
-                console.log(L.properties())
+                __recyclrDebugLog(this, L.properties())
             }
         }
 
         Array.from(Object.keys(tests)).forEach(t => {
-            console.log(`Running ${t} test...`)
+            __recyclrDebugLog(this, `Running ${t} test...`)
             tests[t]()
-            console.log(`${t} test completed...`)
+            __recyclrDebugLog(this, `${t} test completed...`)
         })
     }
 }
@@ -742,8 +1122,11 @@ class Location {
                 type: 'string',
                 value: s
             }
-        })
-        if (!valid) throw console.error('Could not validate...')
+        }, true)
+        if (!valid) {
+            this.string = ''
+            return;
+        }
         // console.log('new location: ')
         // console.log(s)
         this.string = s
@@ -760,8 +1143,8 @@ class Location {
                 type: 'string',
                 value: this.string
             }
-        })
-        if (!valid) throw console.error('Could not validate this.string...')
+        }, true)
+        if (!valid) return [];
 
         // console.log('properties... splitting this.string')
         // console.log(this.string)
@@ -783,8 +1166,8 @@ class Location {
                 type: 'string',
                 value: this.string
             }
-        })
-        if (!valid) throw console.error('Could not validate this.string...')
+        }, true)
+        if (!valid) return '';
         // console.log('selector... splitting this.string')
         // console.log(this.string)
         return this.string.split('[')[0]
@@ -826,3 +1209,40 @@ class Location {
 }
 
 module.exports = GX
+
+
+// --- recyclr: busy/disable helpers ---
+function applyBusyState(root, busy) {
+    try {
+        let el = root;
+        if (!(el instanceof Element)) {
+            el = typeof root === 'string' ? document.querySelector(root) : null;
+        }
+        if (!el) return;
+        if (busy) {
+            el.setAttribute('aria-busy', 'true');
+            el.setAttribute('inert', '');
+        } else {
+            el.removeAttribute('aria-busy');
+            el.removeAttribute('inert');
+        }
+        const focusables = el.querySelectorAll('button, [role="button"], input, select, textarea, [tabindex]');
+        focusables.forEach(node => {
+            if (busy) {
+                node.setAttribute('data-recyclr-prev-disabled', node.disabled ? '1' : '0');
+                node.disabled = true;
+                node.setAttribute('aria-disabled', 'true');
+            } else {
+                const prev = node.getAttribute('data-recyclr-prev-disabled');
+                if (prev === '0') {
+                    node.disabled = false;
+                    node.removeAttribute('aria-disabled');
+                }
+                node.removeAttribute('data-recyclr-prev-disabled');
+            }
+        });
+    } catch (e) {
+        __recyclrDebugLog(this, 'applyBusyState error', e);
+    }
+}
+// --- end busy/disable helpers ---
