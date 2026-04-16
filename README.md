@@ -73,6 +73,18 @@ stream.start();
 
 The realtime payload should include `html`, and can optionally include `presets`, `eventName`, or `rules`.
 
+## Versioning
+
+RecyclrJS follows Semantic Versioning:
+
+- `major.minor.patch`
+- `patch` for small fixes
+- `minor` for backward-compatible features
+- `major` for breaking changes
+
+The repo starts at `1.0.0`. For releases, keep GitHub tags in sync with npm publishes, for example `v1.0.1` or `v1.1.0`.
+Using `npm version patch|minor|major` is the simplest path because it updates `package.json` and creates the matching git tag.
+
 ## Notes
 
 - This package is CommonJS and targets the browser.
