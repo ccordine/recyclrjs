@@ -11,8 +11,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node -e \"require('./index.js')\"",
-    "prepublishOnly": "npm test"
+    "test": "node -e \"require('./index.js')\""
   },
   "keywords": [
     "dom",
@@ -32,13 +31,7 @@
   "bugs": {
     "url": "https://github.com/ccordine/recyclrjs/issues"
   },
-  "homepage": "https://rgx.cordine.site",
-  "author": {
-    "name": "Christopher Cordine",
-    "url": "https://cordine.site/"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "homepage": "https://github.com/ccordine/recyclrjs#readme",
+  "author": "",
   "license": "MIT"
 }
