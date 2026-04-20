@@ -726,6 +726,14 @@ class GX {
                     __recyclrRestoreScroll(preserved);
                 }
 
+                const renderedTarget = this.resolveRenderedTarget(selector, location, target);
+
+                this.runHook('afterRender', {
+                    event,
+                    target,
+                    renderedTarget
+                });
+
                 if (this.dispatch && this.validate({
                     identifier: {
                         type: 'string',
@@ -961,6 +969,42 @@ class GX {
     parseHTML(resp) {
         const parser = new DOMParser()
         return parser.parseFromString(resp, 'text/html')
+    }
+
+    resolveRenderedTarget(selector, location, target) {
+        if (location !== 'outerHTML') {
+            return target
+        }
+
+        try {
+            return document.querySelector(selector)
+        } catch (e) {
+            __recyclrDebugLog(this, 'render: bad rendered target selector', selector, e)
+            return null
+        }
+    }
+
+    runHook(name, payload = {}) {
+        const hook = this.config?.hooks?.[name]
+        if (!hook) {
+            return
+        }
+
+        const hooks = Array.isArray(hook) ? hook : [hook]
+        hooks.forEach(callback => {
+            if (typeof callback !== 'function') {
+                return
+            }
+
+            try {
+                callback({
+                    gx: this,
+                    ...payload
+                })
+            } catch (e) {
+                __recyclrDebugLog(this, `render hook "${name}" failed`, e)
+            }
+        })
     }
 
     handleDispatch(eventName, params = {}) {
