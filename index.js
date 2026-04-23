@@ -566,8 +566,24 @@ class GX {
                         requestBody.body = formData
                         break
                     case 'get':
-                        const queryString = new URLSearchParams(formData).toString();
-                        this.url += `?${queryString}`
+                        // Merge form fields into the existing URL so repeated live-search requests
+                        // replace prior values instead of creating malformed query strings.
+                        const url = new URL(this.url, window.location.href);
+                        const submittedKeys = new Set();
+
+                        for (const [key] of formData.entries()) {
+                            submittedKeys.add(key);
+                        }
+
+                        submittedKeys.forEach((key) => {
+                            url.searchParams.delete(key);
+                        });
+
+                        for (const [key, value] of formData.entries()) {
+                            url.searchParams.append(key, value);
+                        }
+
+                        this.url = url.toString();
                         this.url = this.fixQueryString(this.url)
                         break;
                     default:
