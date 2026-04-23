@@ -942,11 +942,21 @@ class GX {
             // console.log(properties)
             if (properties.length) {
                 let response = doc.querySelector(selector)
+                if (response == null) {
+                    __recyclrDebugLog(this, 'evaluate: missing source', selector)
+                    return false;
+                }
                 // Here we need to find the outputs, and load them in, then return early so it's not replaced or put into my selections
                 return false;
             }
 
-            target.selection = doc.querySelector(selector)[L.string]
+            const source = doc.querySelector(selector)
+            if (source == null) {
+                __recyclrDebugLog(this, 'evaluate: missing source', selector)
+                return;
+            }
+
+            target.selection = source[L.string]
             selections.push(target)
         })
 
