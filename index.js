@@ -319,12 +319,16 @@ class GX {
             if (debug == 'on') this.debug = true
         }
 
-        if (this.validate({
-            presets: {
-                type: 'string',
-                value: presets
-            }
-        })) this.presets = presets.split(' ');
+        if (
+            typeof presets === 'string' &&
+            presets.trim().length > 0 &&
+            this.validate({
+                presets: {
+                    type: 'string',
+                    value: presets
+                }
+            }, true)
+        ) this.presets = presets.split(/[,\s]+/).filter(Boolean);
 
         if (this.presets != null && this.presets.length > 0 && this.config?.presets && Object.keys(this.config.presets).length > 0) {
             if (selection == null) {
