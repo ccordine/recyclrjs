@@ -1,6 +1,6 @@
 {
   "name": "recyclrjs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lightweight HTML fragment swapping for server-driven UIs.",
   "type": "commonjs",
   "main": "./index.js",
